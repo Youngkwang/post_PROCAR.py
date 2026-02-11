@@ -1,0 +1,54 @@
+# Default configuration for VASP post-processing scripts
+# Copy this file and modify as needed, then pass with: --config my_calc.yaml
+
+# Wave suffix for Igor wave names
+wave_suffix: "default"
+
+# Reference energy (eV).
+# Set to "auto" to auto-detect E-fermi from OUTCAR.
+# Set to a float value to use a specific reference energy.
+ref_energy: "auto"
+
+# K-point range (1-indexed). Use null for full range.
+starting_kpoint: 1
+ending_kpoint: null
+
+# Band range (1-indexed). Use null for full range.
+starting_band: 1
+ending_band: null
+
+# Ion range (1-indexed). Use null for full range.
+starting_ion: 1
+ending_ion: null
+
+# Input file paths
+procar_file: "PROCAR"
+outcar_file: "OUTCAR"
+contcar_file: "CONTCAR"
+
+# Output formats: any combination of "igor", "matplotlib", "csv"
+output_formats:
+  - igor
+
+# Energy axis range [min, max] in eV
+energy_range: [-3, 3]
+
+# Matplotlib output image format: png, pdf, or svg
+plot_format: "png"
+
+# Igor Pro graph dimensions (points)
+igor_width: 226.772
+igor_height: 340.157
+
+# Igor Pro font size
+igor_font_size: 24
+
+# Orbital types for projected band output
+orbital_types:
+  - "1_s"
+  - "2_p"
+  - "3_d"
+  - "4_t"
+
+# Projection color scale max for per-ion/element projected bands
+proj_color_max: 0.6
