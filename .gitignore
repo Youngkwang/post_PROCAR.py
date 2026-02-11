@@ -1,2 +1,6 @@
 __pycache__/
 *.pyc
+
+# Legacy scripts (absorbed into post_procar.py)
+post_PROCAR_select_atom.py
+post_PROCAR_simple_band.py
