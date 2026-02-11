@@ -61,6 +61,12 @@ DEFAULTS = {
 
     # Projection color scale max for per-ion/element projected bands
     "proj_color_max": 0.6,
+
+    # Simple band mode: skip projection parsing, only band structure + occupation
+    "simple_band": False,
+
+    # Select atoms: list of 1-indexed atom indices for custom aggregation
+    "select_atoms": None,
 }
 
 
@@ -142,6 +148,15 @@ examples:
         "--contcar-file", metavar="FILE",
         help="Path to CONTCAR file (default: CONTCAR)",
     )
+    parser.add_argument(
+        "--simple-band", action="store_true",
+        help="Only generate band structure and occupation outputs "
+             "(skip projections)",
+    )
+    parser.add_argument(
+        "--select-atoms", type=int, nargs="+", metavar="N",
+        help="List of atom indices (1-indexed) to aggregate projections over",
+    )
 
     return parser
 
@@ -207,6 +222,8 @@ def get_config(argv=None):
         "procar_file": args.procar_file,
         "outcar_file": args.outcar_file,
         "contcar_file": args.contcar_file,
+        "simple_band": args.simple_band if args.simple_band else None,
+        "select_atoms": args.select_atoms,
     }
     for key, value in cli_map.items():
         if value is not None:

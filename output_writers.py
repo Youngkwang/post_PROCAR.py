@@ -329,6 +329,70 @@ def write_igor_pband_per_element(kvec, eigen_val, pro_band_elements,
                 _write_igor_graph_formatting(f, cfg["energy_range"], cfg)
 
 
+def write_igor_pband_select_atoms(kvec, eigen_val, pro_band_selec, cfg):
+    """Write select-atoms projected band .itx files.
+
+    Uses "SL" prefix and BlackBody colormap, matching the original
+    post_PROCAR_select_atom.py output.
+    """
+    suffix = cfg["wave_suffix"]
+    s_kp = cfg["starting_kpoint"] - 1
+    e_kp = cfg["ending_kpoint"]
+    s_band = cfg["starting_band"] - 1
+    e_band = cfg["ending_band"]
+    orbital_types = cfg["orbital_types"]
+    proj_max = cfg.get("proj_color_max", 0.6)
+
+    for t in range(len(orbital_types)):
+        orb = orbital_types[t]
+        filename = "SL_%s_pband_%s.itx" % (suffix, orb)
+        with open(filename, "w") as f:
+            f.write("IGOR\n")
+            f.write("WAVES/D\t")
+            kvec_name = "Kvector_sl_%s_%s" % (orb, suffix)
+            f.write("%s\t" % kvec_name)
+
+            e_names = []
+            p_names = []
+            for y in range(s_band, e_band):
+                name = "E_band_%03d_sl_%s_%s" % (y + 1, orb, suffix)
+                e_names.append(name)
+                f.write("%s\t" % name)
+            for y in range(s_band, e_band):
+                name = "P_band_%03d_sl_%s_%s" % (y + 1, orb, suffix)
+                p_names.append(name)
+                f.write("%s\t" % name)
+
+            f.write("\n")
+            f.write("BEGIN\n")
+
+            for x in range(s_kp, e_kp):
+                f.write("%.10f\t" % kvec[x])
+                for y in range(s_band, e_band):
+                    f.write("%.8f\t" % eigen_val[y][x])
+                for y in range(s_band, e_band):
+                    f.write("%.8f\t" % pro_band_selec[t][y][x])
+                f.write("\n")
+
+            f.write("END\n")
+
+            f.write("X Display\t")
+            f.write("as\t")
+            f.write('"pband_sl_%s_%s"' % (orb, suffix))
+            f.write(";DelayUpdate\n")
+
+            _write_igor_append_traces(f, e_names, kvec_name, s_band)
+
+            for y in range(s_band, e_band):
+                e_n = "E_band_%03d_sl_%s_%s" % (y + 1, orb, suffix)
+                p_n = "P_band_%03d_sl_%s_%s" % (y + 1, orb, suffix)
+                f.write("X ModifyGraph mode(%s)=0,lsize=2,"
+                        "zColor(%s)={%s,0,%g,BlackBody,1}"
+                        ";DelayUpdate\n" % (e_n, e_n, p_n, proj_max))
+
+            _write_igor_graph_formatting(f, cfg["energy_range"], cfg)
+
+
 # ---------------------------------------------------------------------------
 # CSV writers
 # ---------------------------------------------------------------------------
@@ -426,6 +490,34 @@ def write_csv_pband_per_element(kvec, eigen_val, pro_band_elements,
                            + [pro_band_elements[t][z][y][x]
                               for y in range(s_band, e_band)])
                     writer.writerow(row)
+
+
+def write_csv_pband_select_atoms(kvec, eigen_val, pro_band_selec, cfg):
+    """Write select-atoms projected band CSV files."""
+    s_kp = cfg["starting_kpoint"] - 1
+    e_kp = cfg["ending_kpoint"]
+    s_band = cfg["starting_band"] - 1
+    e_band = cfg["ending_band"]
+    suffix = cfg["wave_suffix"]
+    orbital_types = cfg["orbital_types"]
+
+    for t in range(len(orbital_types)):
+        orb = orbital_types[t]
+        filename = "SL_%s_pband_%s.csv" % (suffix, orb)
+        with open(filename, "w", newline="") as f:
+            writer = csv.writer(f)
+            header = (["kvector"]
+                      + ["E_band_%03d" % (y + 1)
+                         for y in range(s_band, e_band)]
+                      + ["P_band_%03d" % (y + 1)
+                         for y in range(s_band, e_band)])
+            writer.writerow(header)
+            for x in range(s_kp, e_kp):
+                row = ([kvec[x]]
+                       + [eigen_val[y][x] for y in range(s_band, e_band)]
+                       + [pro_band_selec[t][y][x]
+                          for y in range(s_band, e_band)])
+                writer.writerow(row)
 
 
 # ---------------------------------------------------------------------------
@@ -592,3 +684,48 @@ def plot_pband_per_element(kvec, eigen_val, pro_band_elements,
             fig.savefig("%s_pband_%s.%s" % (elem, orbital_types[t], fmt),
                         dpi=300)
             plt.close(fig)
+
+
+def plot_pband_select_atoms(kvec, eigen_val, pro_band_selec, cfg):
+    """Plot select-atoms projected band structure.
+
+    Uses 'hot' colormap to approximate Igor Pro's BlackBody.
+    """
+    _check_matplotlib()
+    s_kp = cfg["starting_kpoint"] - 1
+    e_kp = cfg["ending_kpoint"]
+    s_band = cfg["starting_band"] - 1
+    e_band = cfg["ending_band"]
+    suffix = cfg["wave_suffix"]
+    orbital_types = cfg["orbital_types"]
+    proj_max = cfg.get("proj_color_max", 0.6)
+    fmt = cfg.get("plot_format", "png")
+
+    k = kvec[s_kp:e_kp]
+
+    for t in range(len(orbital_types)):
+        orb = orbital_types[t]
+        fig, ax = plt.subplots(figsize=(4, 6))
+        for y in range(s_band, e_band):
+            energies = [eigen_val[y][x] for x in range(s_kp, e_kp)]
+            proj = [pro_band_selec[t][y][x] for x in range(s_kp, e_kp)]
+
+            points = np.array([k, energies]).T.reshape(-1, 1, 2)
+            segments = np.concatenate([points[:-1], points[1:]], axis=1)
+            seg_proj = [(proj[i] + proj[i + 1]) / 2
+                        for i in range(len(proj) - 1)]
+
+            lc = LineCollection(segments, cmap="hot",
+                                norm=plt.Normalize(0, proj_max))
+            lc.set_array(np.array(seg_proj))
+            lc.set_linewidth(1.5)
+            ax.add_collection(lc)
+
+        _setup_band_axes(ax, cfg["energy_range"])
+        ax.set_xlim(k[0], k[-1])
+        cbar = fig.colorbar(lc, ax=ax)
+        cbar.set_label("Projection weight")
+        ax.set_title("Select atoms — %s" % orb)
+        fig.tight_layout()
+        fig.savefig("SL_%s_pband_%s.%s" % (suffix, orb, fmt), dpi=300)
+        plt.close(fig)

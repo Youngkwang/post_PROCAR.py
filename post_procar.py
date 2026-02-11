@@ -124,6 +124,67 @@ def parse_procar(procar_lines, num_kpoints, num_bands, num_ions,
     return eigen_val_mat, elec_occ_mat, pro_band_mat
 
 
+def parse_procar_simple(procar_lines, num_kpoints, num_bands, num_ions,
+                        starting_band, ending_band,
+                        starting_kpoint, check_soc, ref_energy):
+    """Parse only eigenvalues and occupations from PROCAR (no projections).
+
+    This is much faster than parse_procar() for large systems because it
+    skips the ion/projection loop entirely.
+
+    Returns (eigen_val_mat, elec_occ_mat).
+    """
+    eigen_val_mat = [[0.0] * num_kpoints for _ in range(num_bands)]
+    elec_occ_mat = [[0.0] * num_kpoints for _ in range(num_bands)]
+
+    for m in range(starting_band, ending_band + 1):
+        print("Band number %03d is being generated" % m)
+
+        for k in range(starting_kpoint, num_kpoints + 1):
+            if check_soc == "F":
+                h = (4 + (k - 1) * (num_bands * (num_ions + 5) + 3)
+                     + (2 + (m - 1) * (num_ions + 5)))
+            elif check_soc == "T":
+                h = (4 + (k - 1) * (num_bands * 4 * (num_ions + 2) + 3)
+                     + (2 + (m - 1) * 4 * (num_ions + 2)))
+            else:
+                raise ValueError(
+                    "Unexpected LSORBIT value: %s" % check_soc)
+
+            eigen_parts = procar_lines[h - 1].split()
+            eigen_val_mat[m - 1][k - 1] = float(eigen_parts[4]) - ref_energy
+            elec_occ_mat[m - 1][k - 1] = float(eigen_parts[7])
+
+    return eigen_val_mat, elec_occ_mat
+
+
+def aggregate_projections_by_atoms(pro_band_mat, select_atoms, orbital_types,
+                                   num_kpoints, num_bands,
+                                   starting_band, ending_band,
+                                   starting_kpoint, ending_kpoint):
+    """Aggregate per-ion projections over a custom list of atom indices.
+
+    Parameters
+    ----------
+    select_atoms : list of int
+        1-indexed atom indices to sum over.
+
+    Returns pro_band_selec_mat[orbital][band][kpoint] (no ion dimension).
+    """
+    pro_band_selec_mat = [
+        [[0.0] * num_kpoints for _ in range(num_bands)]
+        for _ in range(4)
+    ]
+
+    for t in range(len(orbital_types)):
+        for e in select_atoms:
+            for y in range(starting_band - 1, ending_band):
+                for x in range(starting_kpoint - 1, ending_kpoint):
+                    pro_band_selec_mat[t][y][x] += pro_band_mat[t][e - 1][y][x]
+
+    return pro_band_selec_mat
+
+
 def aggregate_projections_by_element(pro_band_mat, element_type, element_num,
                                      orbital_types, num_kpoints, num_bands,
                                      starting_band, ending_band,
@@ -223,34 +284,62 @@ def main():
         outcar_lines, num_kpoints, starting_kpoint, cfg["outcar_file"])
 
     # Parse PROCAR data
-    eigen_val_mat, elec_occ_mat, pro_band_mat = parse_procar(
-        procar_lines, num_kpoints, num_bands, num_ions,
-        starting_band, ending_band, starting_ion, ending_ion,
-        starting_kpoint, check_soc, ref_energy,
-    )
+    simple_band = cfg.get("simple_band", False)
+    select_atoms = cfg.get("select_atoms", None)
 
-    # Element info for per-element projections
-    contcar = cfg["contcar_file"]
-    if not os.path.isfile(contcar):
-        print("Error: file not found: %s" % contcar, file=sys.stderr)
-        sys.exit(1)
-    element_type = vasp.get_elements_type(contcar)
-    element_num = vasp.get_elements_num(contcar)
-    element_info = vasp.get_elements_info(contcar)
+    if simple_band:
+        # Lightweight parse: eigenvalues + occupations only (no projections)
+        print("Simple band mode: skipping projection parsing")
+        eigen_val_mat, elec_occ_mat = parse_procar_simple(
+            procar_lines, num_kpoints, num_bands, num_ions,
+            starting_band, ending_band,
+            starting_kpoint, check_soc, ref_energy,
+        )
+        pro_band_mat = None
+    else:
+        eigen_val_mat, elec_occ_mat, pro_band_mat = parse_procar(
+            procar_lines, num_kpoints, num_bands, num_ions,
+            starting_band, ending_band, starting_ion, ending_ion,
+            starting_kpoint, check_soc, ref_energy,
+        )
 
     print("num_IONS: %d" % num_ions)
     print("num_KPOINTS: %d" % num_kpoints)
     print("num_BANDS: %d" % num_bands)
     print("ref_E: %.4f eV" % ref_energy)
-    print(element_info)
 
-    # Aggregate projections by element
+    # Element info and aggregation (skip in simple-band mode)
     orbital_types = cfg["orbital_types"]
-    pro_band_elements_mat = aggregate_projections_by_element(
-        pro_band_mat, element_type, element_num, orbital_types,
-        num_kpoints, num_bands, starting_band, ending_band,
-        starting_kpoint, ending_kpoint,
-    )
+    element_type = None
+    pro_band_elements_mat = None
+    pro_band_selec_mat = None
+
+    if not simple_band:
+        contcar = cfg["contcar_file"]
+        if not os.path.isfile(contcar):
+            print("Error: file not found: %s" % contcar, file=sys.stderr)
+            sys.exit(1)
+        element_type = vasp.get_elements_type(contcar)
+        element_num = vasp.get_elements_num(contcar)
+        element_info = vasp.get_elements_info(contcar)
+        print(element_info)
+
+        # Aggregate projections by element
+        pro_band_elements_mat = aggregate_projections_by_element(
+            pro_band_mat, element_type, element_num, orbital_types,
+            num_kpoints, num_bands, starting_band, ending_band,
+            starting_kpoint, ending_kpoint,
+        )
+
+        # Aggregate projections by selected atoms
+        if select_atoms is not None:
+            print("Select atoms mode: aggregating over atoms %s" %
+                  select_atoms)
+            pro_band_selec_mat = aggregate_projections_by_atoms(
+                pro_band_mat, select_atoms, orbital_types,
+                num_kpoints, num_bands, starting_band, ending_band,
+                starting_kpoint, ending_kpoint,
+            )
 
     # Generate outputs
     output_formats = cfg["output_formats"]
@@ -260,33 +349,45 @@ def main():
         writers.write_igor_band_structure(kvec_mat, eigen_val_mat, cfg)
         writers.write_igor_occ_band(
             kvec_mat, eigen_val_mat, elec_occ_mat, cfg)
-        writers.write_igor_pband_per_ion(
-            kvec_mat, eigen_val_mat, pro_band_mat, cfg)
-        writers.write_igor_pband_per_element(
-            kvec_mat, eigen_val_mat, pro_band_elements_mat,
-            element_type, cfg)
+        if not simple_band:
+            writers.write_igor_pband_per_ion(
+                kvec_mat, eigen_val_mat, pro_band_mat, cfg)
+            writers.write_igor_pband_per_element(
+                kvec_mat, eigen_val_mat, pro_band_elements_mat,
+                element_type, cfg)
+            if pro_band_selec_mat is not None:
+                writers.write_igor_pband_select_atoms(
+                    kvec_mat, eigen_val_mat, pro_band_selec_mat, cfg)
 
     if "csv" in output_formats:
         print("Writing CSV files...")
         writers.write_csv_band_structure(kvec_mat, eigen_val_mat, cfg)
         writers.write_csv_occ_band(
             kvec_mat, eigen_val_mat, elec_occ_mat, cfg)
-        writers.write_csv_pband_per_ion(
-            kvec_mat, eigen_val_mat, pro_band_mat, cfg)
-        writers.write_csv_pband_per_element(
-            kvec_mat, eigen_val_mat, pro_band_elements_mat,
-            element_type, cfg)
+        if not simple_band:
+            writers.write_csv_pband_per_ion(
+                kvec_mat, eigen_val_mat, pro_band_mat, cfg)
+            writers.write_csv_pband_per_element(
+                kvec_mat, eigen_val_mat, pro_band_elements_mat,
+                element_type, cfg)
+            if pro_band_selec_mat is not None:
+                writers.write_csv_pband_select_atoms(
+                    kvec_mat, eigen_val_mat, pro_band_selec_mat, cfg)
 
     if "matplotlib" in output_formats:
         print("Writing matplotlib plots...")
         writers.plot_band_structure(kvec_mat, eigen_val_mat, cfg)
         writers.plot_occ_band(
             kvec_mat, eigen_val_mat, elec_occ_mat, cfg)
-        writers.plot_pband_per_ion(
-            kvec_mat, eigen_val_mat, pro_band_mat, cfg)
-        writers.plot_pband_per_element(
-            kvec_mat, eigen_val_mat, pro_band_elements_mat,
-            element_type, cfg)
+        if not simple_band:
+            writers.plot_pband_per_ion(
+                kvec_mat, eigen_val_mat, pro_band_mat, cfg)
+            writers.plot_pband_per_element(
+                kvec_mat, eigen_val_mat, pro_band_elements_mat,
+                element_type, cfg)
+            if pro_band_selec_mat is not None:
+                writers.plot_pband_select_atoms(
+                    kvec_mat, eigen_val_mat, pro_band_selec_mat, cfg)
 
     print("Done.")
 

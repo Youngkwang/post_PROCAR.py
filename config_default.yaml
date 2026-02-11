@@ -52,3 +52,12 @@ orbital_types:
 
 # Projection color scale max for per-ion/element projected bands
 proj_color_max: 0.6
+
+# Simple band mode: skip projection parsing, only output band structure + occupation.
+# Useful when you only need eigenvalues (much faster for large systems).
+simple_band: false
+
+# Select atoms: list of 1-indexed atom indices to aggregate projections over.
+# Produces additional output files with "SL" prefix using BlackBody colormap.
+# Example: [17, 18, 47, 48]
+select_atoms: null
